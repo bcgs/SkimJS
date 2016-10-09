@@ -12,21 +12,26 @@ import Value
 
 evalExpr :: StateT -> Expression -> StateTransformer Value
 evalExpr env (VarRef (Id id)) = stateLookup env id
+
 evalExpr env (IntLit int) = return $ Int int
+
 evalExpr env (PrefixExpr PrefixMinus expr) = do
     e <- evalExpr env expr
     case e of
         (Int i) -> return $ Int (-i)
+
 evalExpr env (BoolLit bool) = return $ Bool bool
+
 evalExpr env (InfixExpr op expr1 expr2) = do
     v1 <- evalExpr env expr1
     v2 <- evalExpr env expr2
     infixOp env op v1 v2
+
 evalExpr env (AssignExpr OpAssign (LVar var) expr) = do
     stateLookup env var -- crashes if the variable doesn't exist
     e <- evalExpr env expr
     setVar var e
--- i++, i--;
+
 evalExpr env (UnaryAssignExpr unaryAssignOp (LVar var)) = do
     stateLookup env var
     case unaryAssignOp of
@@ -36,56 +41,88 @@ evalExpr env (UnaryAssignExpr unaryAssignOp (LVar var)) = do
         (PostfixDec) -> do
             e <- evalExpr env (InfixExpr OpSub (VarRef (Id var)) (IntLit 1))
             setVar var e
+
 evalExpr env (NullLit) = return Nil
 
 evalStmt :: StateT -> Statement -> StateTransformer Value
 evalStmt env EmptyStmt = return Nil
+
 evalStmt env (VarDeclStmt []) = return Nil
+
 evalStmt env (VarDeclStmt (decl:ds)) =
     varDecl env decl >> evalStmt env (VarDeclStmt ds)
+
 evalStmt env (ExprStmt expr) = evalExpr env expr
+
+evalStmt env (BreakStmt Nothing) = return Break
+
 evalStmt env (BlockStmt []) = return Nil
 evalStmt env (BlockStmt (stmt:stmts)) = do
-    evalStmt env stmt
-    evalStmt env (BlockStmt stmts)
+    case stmt of
+        (BreakStmt Nothing) -> return Break
+        _ -> do
+            evalStmt env stmt
+            evalStmt env (BlockStmt stmts)
+
 evalStmt env (IfSingleStmt expr stmt) = do
     e <- evalExpr env expr
     case e of
         (Bool b) -> 
-            if (b) then evalStmt env stmt
+            if b then evalStmt env stmt
             else return Nil
         _ -> error $ "Not a valid expression."
+
 evalStmt env (IfStmt expr stmt1 stmt2) = do
     e <- evalExpr env expr
     case e of
         (Bool b) -> 
-            if (b) then evalStmt env stmt1 
+            if b then evalStmt env stmt1 
             else evalStmt env stmt2
         _ -> error $ "Not a valid expression."
+
 evalStmt env (WhileStmt expr stmt) = do
     e <- evalExpr env expr
     case e of
         (Bool b) ->
-            if (b) then do
-                evalStmt env stmt
-                evalStmt env (WhileStmt expr stmt)
+            if b then do
+                val <- evalStmt env stmt
+                let ret = case val of
+                        (Break) -> True
+                        _ -> False
+                    in do
+                    if ret then return Nil
+                    else evalStmt env $ WhileStmt expr stmt
             else return Nil
+
 evalStmt env (DoWhileStmt stmt expr) = do
-    evalStmt env stmt
-    e <- evalExpr env expr
-    case e of
-        (Bool b) -> 
-            if (b) then evalStmt env (DoWhileStmt stmt expr)
-            else return Nil
+    val <- evalStmt env stmt
+    let ret = case val of
+            (Break) -> True
+            _ -> False
+        in do
+        if ret then return Nil
+        else do
+            e <- evalExpr env expr
+            case e of
+                (Bool b) -> 
+                    if b then evalStmt env $ DoWhileStmt stmt expr
+                    else return Nil
+
 evalStmt env (ForStmt forInit condition ipp stmt) = do
-    evalExpr env v
+    evalExpr env val
     cond <- evalExpr env e1
     case cond of
         (Bool b) -> 
-            if b then do 
-                evalStmt env stmt
-                evalExpr env e2
-                evalStmt env (ForStmt (NoInit) condition ipp stmt)
+            if b then do
+                val <- evalStmt env stmt
+                let ret = case val of
+                        (Break) -> True
+                        _ -> False
+                    in do
+                    if ret then return Nil
+                    else do
+                        evalExpr env e2
+                        evalStmt env $ ForStmt NoInit condition ipp stmt
             else
                 return Nil
     where
@@ -93,10 +130,9 @@ evalStmt env (ForStmt forInit condition ipp stmt) = do
             (Just val) -> val
         e2 = case ipp of
             (Just val) -> val
-        v = case forInit of
+        val = case forInit of
             (ExprInit expr) -> expr
             (NoInit) -> NullLit
-
 
 -- Do not touch this one :)
 evaluate :: StateT -> [Statement] -> StateTransformer Value

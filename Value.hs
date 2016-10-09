@@ -5,6 +5,7 @@ data Value = Bool Bool
     | String String
     | Var String
     | Nil
+    | Break
 
 --
 -- Pretty Printer
