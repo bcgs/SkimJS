@@ -57,7 +57,15 @@ evalExpr env (CallExpr funcName values) = do
     case val of
         (Return ret) -> return $ Return ret
         (Break) -> return Nil
-    
+
+evalExpr env (ArrayLit []) = return $ List []    
+evalExpr env (ArrayLit (expr:exprs)) = do
+    x  <- evalExpr env expr
+    xs <- evalExpr env (ArrayLit exprs)
+    case xs of
+        (List []) -> return $ List [x]
+        _ -> return $ List $ [x] ++ [xs]
+
 
 evalStmt :: StateT -> Statement -> StateTransformer Value
 evalStmt env EmptyStmt = return Nil
@@ -189,7 +197,13 @@ infixOp env OpNEq  (Bool v1) (Bool v2) = return $ Bool $ v1 /= v2
 infixOp env OpLAnd (Bool v1) (Bool v2) = return $ Bool $ v1 && v2
 infixOp env OpLOr  (Bool v1) (Bool v2) = return $ Bool $ v1 || v2
 
---
+infixOp env OpEq (List []) (List []) = return $ Bool $ True
+infixOp env OpEq (List (x:xs)) (List (y:ys)) = do
+    (Bool b1) <- infixOp env OpEq x y
+    (Bool b2) <- infixOp env OpEq (List xs) (List ys)
+    return $ Bool $ (b1 && b2)
+
+-- 
 -- Environment and auxiliary functions
 --
 
