@@ -1,6 +1,18 @@
-var x = 0, y = 10, i;
-for (i = 0; i < 5; i++) {
-	x = x + 1;
-	if (x == 3) break;
+function mult2(a) {
+	return a*2;
 }
-x - y;
+var fat = 1;
+function factorial(i) {
+	if(i == 2) return 2;
+	return i * factorial(i-1);
+}
+function test(i) {
+	if(i >= 5) {
+		factorial(i);
+		break;
+	} else {
+		mult2(i);
+	}
+	return i++;
+}
+test(4);

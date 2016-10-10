@@ -25,7 +25,13 @@ evalExpr env (BoolLit bool) = return $ Bool bool
 evalExpr env (InfixExpr op expr1 expr2) = do
     v1 <- evalExpr env expr1
     v2 <- evalExpr env expr2
-    infixOp env op v1 v2
+    let v11 = case v1 of
+            (Return val) -> val
+            _ -> v1
+        v22 = case v2 of
+            (Return val) -> val
+            _ -> v2
+        in infixOp env op v11 v22
 
 evalExpr env (AssignExpr OpAssign (LVar var) expr) = do
     stateLookup env var -- crashes if the variable doesn't exist
@@ -44,11 +50,19 @@ evalExpr env (UnaryAssignExpr unaryAssignOp (LVar var)) = do
 
 evalExpr env (NullLit) = return Nil
 
+evalExpr env (CallExpr funcName values) = do
+    (Function id args body) <- evalExpr env funcName
+    evalStmt env $ VarDeclStmt $ varDeclList args values
+    val <- evalStmt env $ BlockStmt body
+    case val of
+        (Return ret) -> return $ Return ret
+        (Break) -> return Nil
+    
+
 evalStmt :: StateT -> Statement -> StateTransformer Value
 evalStmt env EmptyStmt = return Nil
 
 evalStmt env (VarDeclStmt []) = return Nil
-
 evalStmt env (VarDeclStmt (decl:ds)) =
     varDecl env decl >> evalStmt env (VarDeclStmt ds)
 
@@ -60,15 +74,27 @@ evalStmt env (BlockStmt []) = return Nil
 evalStmt env (BlockStmt (stmt:stmts)) = do
     case stmt of
         (BreakStmt Nothing) -> return Break
+        (ReturnStmt (Just val)) -> do
+            ret <- evalExpr env val
+            return $ Return ret
         _ -> do
-            evalStmt env stmt
-            evalStmt env (BlockStmt stmts)
+            val <- evalStmt env stmt
+            case val of
+                (Return ret) -> return $ Return ret
+                (Break) -> return Break
+                _ -> evalStmt env (BlockStmt stmts)
 
 evalStmt env (IfSingleStmt expr stmt) = do
     e <- evalExpr env expr
     case e of
         (Bool b) -> 
-            if b then evalStmt env stmt
+            if b then 
+                case stmt of
+                    (ReturnStmt (Just val)) -> do
+                        ret <- evalExpr env val
+                        return $ Return ret
+                    (BlockStmt val) -> evalStmt env (BlockStmt val)
+                    (BreakStmt Nothing) -> return Break
             else return Nil
         _ -> error $ "Not a valid expression."
 
@@ -134,6 +160,10 @@ evalStmt env (ForStmt forInit condition ipp stmt) = do
             (ExprInit expr) -> expr
             (NoInit) -> NullLit
 
+evalStmt env (FunctionStmt id args body) = 
+    funcDecl env (id, args, body)
+
+
 -- Do not touch this one :)
 evaluate :: StateT -> [Statement] -> StateTransformer Value
 evaluate env [] = return Nil
@@ -183,6 +213,15 @@ varDecl env (VarDecl (Id id) maybeExpr) = do
 
 setVar :: String -> Value -> StateTransformer Value
 setVar var val = ST $ \s -> (val, insert var val s)
+
+funcDecl :: StateT -> (Id,[Id],[Statement]) -> StateTransformer Value
+funcDecl env ((Id id), args, body) = 
+    setVar id $ Function (Id id) args body
+
+varDeclList :: [Id] -> [Expression] -> [VarDecl]
+varDeclList [] [] = []
+varDeclList (arg:args) (value:values) =
+    (VarDecl arg (Just value)):varDeclList args values
 
 --
 -- Types and boilerplate
