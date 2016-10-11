@@ -66,6 +66,8 @@ evalExpr env (ArrayLit (expr:exprs)) = do
         (List []) -> return $ List [x]
         _ -> return $ List $ [x] ++ [xs]
 
+-- evalExpr env (DotRef list func) = do    -- i.concat
+
 
 evalStmt :: StateT -> Statement -> StateTransformer Value
 evalStmt env EmptyStmt = return Nil
@@ -76,33 +78,27 @@ evalStmt env (VarDeclStmt (decl:ds)) =
 
 evalStmt env (ExprStmt expr) = evalExpr env expr
 
+evalStmt env (ReturnStmt maybeExpr) = do
+    case maybeExpr of 
+        (Just val) -> do
+            ret <- evalExpr env val
+            return $ Return ret
+
 evalStmt env (BreakStmt Nothing) = return Break
 
 evalStmt env (BlockStmt []) = return Nil
 evalStmt env (BlockStmt (stmt:stmts)) = do
-    case stmt of
-        (BreakStmt Nothing) -> return Break
-        (ReturnStmt (Just val)) -> do
-            ret <- evalExpr env val
-            return $ Return ret
-        _ -> do
-            val <- evalStmt env stmt
-            case val of
-                (Return ret) -> return $ Return ret
-                (Break) -> return Break
-                _ -> evalStmt env (BlockStmt stmts)
+    val <- evalStmt env stmt
+    case val of
+        (Return ret) -> return $ Return ret
+        (Break) -> return Break
+        _ -> evalStmt env (BlockStmt stmts)
 
 evalStmt env (IfSingleStmt expr stmt) = do
     e <- evalExpr env expr
     case e of
         (Bool b) -> 
-            if b then 
-                case stmt of
-                    (ReturnStmt (Just val)) -> do
-                        ret <- evalExpr env val
-                        return $ Return ret
-                    (BlockStmt val) -> evalStmt env (BlockStmt val)
-                    (BreakStmt Nothing) -> return Break
+            if b then evalStmt env stmt
             else return Nil
         _ -> error $ "Not a valid expression."
 
@@ -110,7 +106,7 @@ evalStmt env (IfStmt expr stmt1 stmt2) = do
     e <- evalExpr env expr
     case e of
         (Bool b) -> 
-            if b then evalStmt env stmt1 
+            if b then evalStmt env stmt1
             else evalStmt env stmt2
         _ -> error $ "Not a valid expression."
 
