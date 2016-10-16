@@ -1,18 +1,16 @@
-function mult2(a) {
-	return a*2;
-}
-var fat = 1;
-function factorial(i) {
-	if(i == 2) return 2;
-	return i * factorial(i-1);
-}
-function test(i) {
-	if(i >= 5) {
-		factorial(i);
-		break;
+var i = [1,2,3,4,5];
+len(i);
+--
+var i = [1,2,3];
+var j = [4,5];
+var k = ((i.tail()).head()).concat(j);
+
+function len(l) {
+	if(l == []) {
+		return 0;
 	} else {
-		mult2(i);
+		return 1 + (len(l.tail()))
 	}
-	return i++;
 }
-test(5);
+
+len(k);

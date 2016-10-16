@@ -10,6 +10,7 @@ data Value = Bool Bool
     | Function Id [Id] [Statement]
     | Return Value
     | List [Value]
+    | Error String
 
 --
 -- Pretty Printer
@@ -25,6 +26,7 @@ instance Show Value where
   show (Function (Id id) args body) = show args
   show (Return val) = show val
   show (List values) = show values
+  show (Error err) = "Error: " ++ err
   
 -- This function could be replaced by (unwords.map show). The unwords
 -- function takes a list of String values and uses them to build a 

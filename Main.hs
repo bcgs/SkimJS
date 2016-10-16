@@ -2,7 +2,7 @@ import qualified Language.ECMAScript3.Parser as Parser
 import Language.ECMAScript3.Syntax
 import Control.Monad
 import Control.Applicative
-import Data.Map as Map (Map, insert, lookup, union, toList, empty)
+import Data.Map as Map (Map, insert, delete, lookup, union, toList, empty)
 import Debug.Trace
 import Value
 
@@ -51,22 +51,38 @@ evalExpr env (UnaryAssignExpr unaryAssignOp (LVar var)) = do
 evalExpr env (NullLit) = return Nil
 
 evalExpr env (CallExpr funcName values) = do
-    (Function id args body) <- evalExpr env funcName
-    evalStmt env $ VarDeclStmt $ varDeclList args values
-    val <- evalStmt env $ BlockStmt body
-    case val of
-        (Return ret) -> return $ Return ret
-        (Break) -> return Nil
+    case funcName of
+        (DotRef list1 (Id func)) -> do
+            List l1 <- evalExpr env list1
+            case func of
+                ("head") -> do
+                    case l1 of
+                        (x:xs) -> return $ List [x]
+                        [] -> return $ List []
+                ("tail") -> do
+                    case l1 of
+                        (x:xs) -> return $ List xs
+                        [] -> return $ List []
+                ("concat") -> do
+                    List l2 <- evalExpr env (head values)
+                    return $ List $ l1 ++ l2
+        _ -> do
+            (Function id args body) <- evalExpr env funcName
+            evalStmt env $ VarDeclStmt $ varDeclList args values
+            val <- evalStmt env $ BlockStmt body
+            case val of
+                (Return ret) -> return $ Return ret
+                (Break) -> return Nil
+                (Int i) -> return $ Int i -- CHECK IF REALLY NEEDED
+                (Error str) -> return $ Error str
 
 evalExpr env (ArrayLit []) = return $ List []    
 evalExpr env (ArrayLit (expr:exprs)) = do
     x  <- evalExpr env expr
-    xs <- evalExpr env (ArrayLit exprs)
+    (List xs) <- evalExpr env (ArrayLit exprs)
     case xs of
-        (List []) -> return $ List [x]
-        _ -> return $ List $ [x] ++ [xs]
-
--- evalExpr env (DotRef list func) = do    -- i.concat
+        [] -> return $ List (x:[])
+        _ -> return $ List $ (x:xs)
 
 
 evalStmt :: StateT -> Statement -> StateTransformer Value
@@ -83,6 +99,7 @@ evalStmt env (ReturnStmt maybeExpr) = do
         (Just val) -> do
             ret <- evalExpr env val
             return $ Return ret
+        (Nothing) -> return $ Return Nil
 
 evalStmt env (BreakStmt Nothing) = return Break
 
@@ -198,6 +215,7 @@ infixOp env OpEq (List (x:xs)) (List (y:ys)) = do
     (Bool b1) <- infixOp env OpEq x y
     (Bool b2) <- infixOp env OpEq (List xs) (List ys)
     return $ Bool $ (b1 && b2)
+infixOp env OpEq _ _ = return $ Bool $ False
 
 -- 
 -- Environment and auxiliary functions
@@ -210,7 +228,7 @@ stateLookup :: StateT -> String -> StateTransformer Value
 stateLookup env var = ST $ \s ->
     -- this way the error won't be skipped by lazy evaluation
     case Map.lookup var (union s env) of
-        Nothing -> error $ "Variable " ++ show var ++ " not defiend."
+        Nothing -> (Error $ "Variable " ++ show var ++ " not defined.", s)
         Just val -> (val, s)
 
 varDecl :: StateT -> VarDecl -> StateTransformer Value
@@ -224,6 +242,9 @@ varDecl env (VarDecl (Id id) maybeExpr) = do
 setVar :: String -> Value -> StateTransformer Value
 setVar var val = ST $ \s -> (val, insert var val s)
 
+removeVar :: String -> Value -> StateTransformer Value
+removeVar var val = ST $ \s -> (val, delete var s)
+
 funcDecl :: StateT -> (Id,[Id],[Statement]) -> StateTransformer Value
 funcDecl env ((Id id), args, body) = 
     setVar id $ Function (Id id) args body
@@ -232,6 +253,7 @@ varDeclList :: [Id] -> [Expression] -> [VarDecl]
 varDeclList [] [] = []
 varDeclList (arg:args) (value:values) =
     (VarDecl arg (Just value)):varDeclList args values
+varDeclList _ _ = error $ "List of params doesn't match!"
 
 --
 -- Types and boilerplate
