@@ -2,7 +2,7 @@ import qualified Language.ECMAScript3.Parser as Parser
 import Language.ECMAScript3.Syntax
 import Control.Monad
 import Control.Applicative
-import Data.Map as Map (Map, insert, delete, lookup, union, toList, empty)
+import Data.Map as Map (Map, insert, lookup, union, toList, empty)
 import Debug.Trace
 import Value
 
@@ -19,6 +19,7 @@ evalExpr env (PrefixExpr PrefixMinus expr) = do
     e <- evalExpr env expr
     case e of
         (Int i) -> return $ Int (-i)
+        _ -> return $ Error $ "Not Integer"
 
 evalExpr env (BoolLit bool) = return $ Bool bool
 
@@ -33,20 +34,32 @@ evalExpr env (InfixExpr op expr1 expr2) = do
             _ -> v2
         in infixOp env op v11 v22
 
+evalExpr env (AssignExpr OpAssign (LBracket (VarRef (Id id)) expr2) expr3) = do
+    List list <- evalExpr env (VarRef (Id id))
+    Int index <- evalExpr env expr2
+    newValue <- evalExpr env expr3
+    setVar id $ List $ setValue index list newValue
+
 evalExpr env (AssignExpr OpAssign (LVar var) expr) = do
-    stateLookup env var -- crashes if the variable doesn't exist
-    e <- evalExpr env expr
-    setVar var e
+    val <- stateLookup env var -- crashes if the variable doesn't exist
+    case val of
+        (Error _) -> return $ Error $ "Variable " ++ show var ++ " not defined!"
+        _ -> do
+            e <- evalExpr env expr
+            setVar var e
 
 evalExpr env (UnaryAssignExpr unaryAssignOp (LVar var)) = do
-    stateLookup env var
-    case unaryAssignOp of
-        (PostfixInc) -> do
-            e <- evalExpr env (InfixExpr OpAdd (VarRef (Id var)) (IntLit 1))
-            setVar var e
-        (PostfixDec) -> do
-            e <- evalExpr env (InfixExpr OpSub (VarRef (Id var)) (IntLit 1))
-            setVar var e
+    val <- stateLookup env var
+    case val of
+        (Error _) -> return $ Error $ "Variable " ++ show var ++ " not defined!"
+        _ -> do
+            case unaryAssignOp of
+                (PostfixInc) -> do
+                    e <- evalExpr env (InfixExpr OpAdd (VarRef (Id var)) (IntLit 1))
+                    setVar var e
+                (PostfixDec) -> do
+                    e <- evalExpr env (InfixExpr OpSub (VarRef (Id var)) (IntLit 1))
+                    setVar var e
 
 evalExpr env (NullLit) = return Nil
 
@@ -57,8 +70,8 @@ evalExpr env (CallExpr funcName values) = do
             case func of
                 ("head") -> do
                     case l1 of
-                        (x:xs) -> return $ List [x]
-                        [] -> return $ List []
+                        (x:xs) -> return x
+                        [] -> return $ Error $ "OutOfBoundsException."
                 ("tail") -> do
                     case l1 of
                         (x:xs) -> return $ List xs
@@ -73,8 +86,9 @@ evalExpr env (CallExpr funcName values) = do
             case val of
                 (Return ret) -> return $ Return ret
                 (Break) -> return Nil
-                (Int i) -> return $ Int i -- CHECK IF REALLY NEEDED
+                (Int i) -> return $ Int i
                 (Error str) -> return $ Error str
+                (Bool b) -> return $ Bool b
 
 evalExpr env (ArrayLit []) = return $ List []    
 evalExpr env (ArrayLit (expr:exprs)) = do
@@ -83,6 +97,11 @@ evalExpr env (ArrayLit (expr:exprs)) = do
     case xs of
         [] -> return $ List (x:[])
         _ -> return $ List $ (x:xs)
+
+evalExpr env (BracketRef list_ index_) = do
+    Int index <- evalExpr env index_
+    List list <- evalExpr env list_
+    return $ getValue index list
 
 
 evalStmt :: StateT -> Statement -> StateTransformer Value
@@ -156,7 +175,9 @@ evalStmt env (DoWhileStmt stmt expr) = do
                     else return Nil
 
 evalStmt env (ForStmt forInit condition ipp stmt) = do
-    evalExpr env val
+    case forInit of
+        (VarInit decls) -> evalStmt env (VarDeclStmt decls)
+        _ -> evalExpr env val
     cond <- evalExpr env e1
     case cond of
         (Bool b) -> 
@@ -210,12 +231,26 @@ infixOp env OpNEq  (Bool v1) (Bool v2) = return $ Bool $ v1 /= v2
 infixOp env OpLAnd (Bool v1) (Bool v2) = return $ Bool $ v1 && v2
 infixOp env OpLOr  (Bool v1) (Bool v2) = return $ Bool $ v1 || v2
 
+infixOp env OpLAnd (List []) (List []) = return $ Bool $ True
+infixOp env OpLAnd (List (x:xs)) (List (y:ys)) = do
+    (Bool b1) <- infixOp env OpLAnd x y
+    (Bool b2) <- infixOp env OpLAnd (List xs) (List ys)
+    return $ Bool $ (b1 && b2)
+infixOp env OpLAnd _ _ = return $ Bool $ False
+
 infixOp env OpEq (List []) (List []) = return $ Bool $ True
 infixOp env OpEq (List (x:xs)) (List (y:ys)) = do
     (Bool b1) <- infixOp env OpEq x y
     (Bool b2) <- infixOp env OpEq (List xs) (List ys)
     return $ Bool $ (b1 && b2)
 infixOp env OpEq _ _ = return $ Bool $ False
+
+infixOp env OpNEq (List []) (List []) = return $ Bool $ False
+infixOp env OpNEq (List (x:xs)) (List (y:ys)) = do
+    (Bool b1) <- infixOp env OpNEq x y
+    (Bool b2) <- infixOp env OpNEq (List xs) (List ys)
+    return $ Bool $ (b1 && b2)
+infixOp env OpNEq _ _ = return $ Bool $ True
 
 -- 
 -- Environment and auxiliary functions
@@ -228,7 +263,7 @@ stateLookup :: StateT -> String -> StateTransformer Value
 stateLookup env var = ST $ \s ->
     -- this way the error won't be skipped by lazy evaluation
     case Map.lookup var (union s env) of
-        Nothing -> (Error $ "Variable " ++ show var ++ " not defined.", s)
+        Nothing -> (Error $ "Variable " ++ show var ++ " not defined.",s)
         Just val -> (val, s)
 
 varDecl :: StateT -> VarDecl -> StateTransformer Value
@@ -242,9 +277,6 @@ varDecl env (VarDecl (Id id) maybeExpr) = do
 setVar :: String -> Value -> StateTransformer Value
 setVar var val = ST $ \s -> (val, insert var val s)
 
-removeVar :: String -> Value -> StateTransformer Value
-removeVar var val = ST $ \s -> (val, delete var s)
-
 funcDecl :: StateT -> (Id,[Id],[Statement]) -> StateTransformer Value
 funcDecl env ((Id id), args, body) = 
     setVar id $ Function (Id id) args body
@@ -254,6 +286,18 @@ varDeclList [] [] = []
 varDeclList (arg:args) (value:values) =
     (VarDecl arg (Just value)):varDeclList args values
 varDeclList _ _ = error $ "List of params doesn't match!"
+
+getValue :: Int -> [Value] -> Value
+getValue index [] = error $ "Index out of bounds exception!"
+getValue 0 (x:xs) = x
+getValue index (x:xs) = getValue (index-1) xs 
+
+setValue :: Int -> [Value] -> Value -> [Value]
+setValue 0 [] newValue = [newValue]
+setValue 0 (x:xs) newValue = (newValue:xs)
+setValue i (x:xs) newValue = x:(setValue (i-1) xs newValue)
+setValue i [] newValue = 
+    error $ "Index out of bounds exception! (index: " ++ show i ++")"
 
 --
 -- Types and boilerplate

@@ -22,7 +22,7 @@ instance Show Value where
   show (Int int) = show int
   show (String str) = "\"" ++ str ++ "\""
   show (Var name) = name
-  show Nil = "undefined"
+  show (Nil) = "undefined"
   show (Function (Id id) args body) = show args
   show (Return val) = show val
   show (List values) = show values
